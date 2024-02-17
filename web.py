@@ -40,17 +40,17 @@ class CreateResource(Resource):
         md5.update(bytes)
         id = str(uuid.uuid4())
         short = get_short(id)
-        data[id] = dict(date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f %Z'), md5 = md5.hexdigest(), short = short, size = len(bytes), url = name + '/' + short, status = 'created', uuid = id, content = bytes.decode())
+        data[id] = dict(date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f %Z'), digest = md5.hexdigest(), short = short, size = len(bytes), url = name + '/' + short, status = 'created', uuid = id, content = bytes.decode())
         return make_response('''
 date: %s
-md5: %s
+digest: %s
 short: %s
 size: %d
 url: %s
 status: %s
 uuid: %s
 '''
-% (data[id]['date'], data[id]['md5'], data[id]['short'], data[id]['size'], data[id]['url'], data[id]['status'], data[id]['uuid']), 200)
+% (data[id]['date'], data[id]['digest'], data[id]['short'], data[id]['size'], data[id]['url'], data[id]['status'], data[id]['uuid']), 200)
         
 class RUDResource(Resource):
     def delete(self, id):
@@ -71,7 +71,7 @@ class RUDResource(Resource):
             md5 = hashlib.md5()
             md5.update(bytes)
             data[id]['content'] = bytes.decode()
-            data[id]['md5'] = md5.hexdigest()
+            data[id]['digest'] = md5.hexdigest()
         return response
     
     def get(self, id):
