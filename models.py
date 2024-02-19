@@ -4,7 +4,7 @@ import enum
 
 Base = declarative_base()
 
-class AuthorStatus(enum.Enum):
+class Visibility(enum.Enum):
     author_only = 0
     someone_only = 1
     all = 2
@@ -19,7 +19,7 @@ class Clipboard(Base):
     uuid = Column(String(45), primary_key = True, nullable = False)
     content = Column(Text)
     author = Column(String(45))
-    status = Column(Enum(AuthorStatus), nullable = False)
+    visibility = Column(Enum(Visibility), nullable = False, default = Visibility.all)
     someone = Column(String(45))
     
 class User(Base):
