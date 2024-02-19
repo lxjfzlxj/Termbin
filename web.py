@@ -4,7 +4,7 @@ from flask_restful import Resource, Api
 from datetime import datetime, timedelta
 import hashlib
 import uuid
-from models import Clipboard, AuthorStatus, get_session, User
+from models import Clipboard, Visibility, get_session, User
 import os
 import base64
 import hmac
@@ -12,7 +12,7 @@ import hmac
 
 app = Flask(__name__)
 api = Api(app)
-name = 'http://127.0.0.1:18080'
+name = 'http://127.0.0.1:5000'
 app.secret_key = os.urandom(50)
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days = 1)
 salt = b'!@#$%^&*()'
@@ -50,10 +50,7 @@ class CreateResource(Resource):
     #         print('login')
             
     def post(self):
-        save_author = request.form.get('save_author')
         username = flask.session.get('username')
-        if save_author == 'true' and username is None:
-            return make_response('you must log in first to save author', 403)
         with get_session() as session:
             bytes = request.files['c'].read()
             print('[Log] Create a new clipboard, content: %s' % bytes.decode())
@@ -61,8 +58,8 @@ class CreateResource(Resource):
             md5.update(bytes)
             id = str(uuid.uuid4())
             short = get_short(id)
-            board_dict = dict(date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f %Z'), digest = md5.hexdigest(), short = short, size = len(bytes), url = name + '/' + short, uuid = id, content = bytes.decode(), status = AuthorStatus.all)
-            if save_author == 'true':
+            board_dict = dict(date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f %Z'), digest = md5.hexdigest(), short = short, size = len(bytes), url = name + '/' + short, uuid = id, content = bytes.decode(), visibility = Visibility.all)
+            if username is not None:
                 board_dict['author'] = username
             new_board = Clipboard(**board_dict)
             try:
@@ -86,22 +83,28 @@ uuid: %s
 
 class RUDResource(Resource):
     def delete(self, id):
+        username = flask.session.get('username')
         with get_session() as session:
             board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
             if board is None:
                 response = make_response('Failed: Cannot find the UUID\n', 404)
             else:
+                if board.author is not None and username != board.author:
+                    return make_response('Failed: no permission to update\n', 403)
                 response = make_response('deleted %s\n' % id, 200)
                 session.delete(board)
                 session.commit()
             return response
     
     def put(self, id):
+        username = flask.session.get('username')
         with get_session() as session:
             board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
             if board is None:
                 response = make_response('Failed: Cannot find the UUID\n', 404)
             else:
+                if board.author is not None and username != board.author:
+                    return make_response('Failed: no permission to update\n', 403)
                 response = make_response('%s updated\n' % board.url, 200)
                 bytes = request.files['c'].read()
                 print('[Log] Update the clipboard, content: %s' % bytes.decode())
@@ -113,15 +116,43 @@ class RUDResource(Resource):
             return response
     
     def get(self, id):
+        username = flask.session.get('username')
         with get_session() as session:
             board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
             if board is None:
                 response = make_response('Failed: Cannot find the UUID\n', 404)
             else:
+                if board.visibility == Visibility.author_only and username != board.author or board.visibility == Visibility.someone_only and username != board.author and username != board.someone:
+                    return make_response('Failed: no permission to view the clipboard\n', 403)
                 response = make_response(board.content, 200)
             return response
 
 
+class BoardVisibilityResource(Resource):
+    def put(self, id):
+        username = flask.session.get('username')
+        with get_session() as session:
+            board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
+            if board is None:
+                return make_response('Failed: Cannot find the UUID\n', 404)
+            if board.author is not None and username != board.author:
+                return make_response('Failed: no permission to update\n', 403)
+            new_status = request.form.get('status')
+            print(new_status)
+            if getattr(Visibility, str(new_status), None) is None:
+                return make_response('Failed: invalid visibility format\n', 403)
+            if new_status == 'someone_only':
+                someone = request.form.get('someone')
+                if someone is None:
+                    return make_response('Failed: someone not found\n', 403)
+                board.someone = someone
+            else:
+                board.someone = None
+            board.visibility = Visibility[new_status]
+            session.commit()
+            return make_response('the visibility of %s updated: %s\n' % (board.url, board.visibility.name), 200)
+
+            
 class UserResource(Resource):
     def post(self):
         header = request.headers.get('Authorization')
@@ -173,3 +204,4 @@ api.add_resource(CreateResource, '/')
 api.add_resource(RUDResource, '/<id>')
 api.add_resource(UserResource, '/user')
 api.add_resource(SessionResource, '/session')
+api.add_resource(BoardVisibilityResource, '/<id>/visibility')
