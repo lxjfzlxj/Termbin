@@ -1,13 +1,20 @@
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, make_response, session
 from flask_restful import Resource, Api
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import uuid
-from models import add, Clipboard, AuthorStatus, get_session
+from models import Clipboard, AuthorStatus, get_session, User
+import os
+import base64
+import hmac
+
 
 app = Flask(__name__)
 api = Api(app)
 name = 'http://127.0.0.1:18080'
+app.secret_key = os.urandom(50)
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days = 1)
+salt = b'!@#$%^&*()'
 
 
 def get_char(num):
@@ -33,10 +40,18 @@ def get_short(id):
     return short
 
 class CreateResource(Resource):
+    # def get(self):
+    #     u = session.get('user')
+    #     if u:
+    #         print('success')
+    #     else:
+    #         session['user'] = '1'
+    #         print('login')
+            
     def post(self):
         with get_session() as session:
             bytes = request.files['c'].read()
-            print('[Debug] Create a new clipboard, content: %s' % bytes.decode())
+            print('[Log] Create a new clipboard, content: %s' % bytes.decode())
             md5 = hashlib.md5()
             md5.update(bytes)
             id = str(uuid.uuid4())
@@ -59,7 +74,8 @@ url: %s
 status: %s
 uuid: %s
 ''' % (new_board.date, new_board.digest, new_board.short, new_board.size, new_board.url, status, new_board.uuid), 200 if status == 'created' else 403)
-        
+
+
 class RUDResource(Resource):
     def delete(self, id):
         with get_session() as session:
@@ -80,7 +96,7 @@ class RUDResource(Resource):
             else:
                 response = make_response('%s updated\n' % board.url, 200)
                 bytes = request.files['c'].read()
-                print('[Debug]Update the clipboard, content: %s' % bytes.decode())
+                print('[Log] Update the clipboard, content: %s' % bytes.decode())
                 md5 = hashlib.md5()
                 md5.update(bytes)
                 board.content = bytes.decode()
@@ -96,6 +112,30 @@ class RUDResource(Resource):
             else:
                 response = make_response(board.content, 200)
             return response
+
+
+class UserResource(Resource):
+    def post(self):
+        header = request.headers.get('Authorization')
+        if not (header and header.startswith('Basic')):
+            return make_response('Failed: username and password not found\n', 403)
+        b64 = header.replace('Basic ', '', 1)
+        up = base64.b64decode(b64).decode()
+        username, password = up.split(':', 1)
+        if len(username) == 0 or len(password) == 0:
+            return make_response('Failed: username or password cannot be empty\n', 403)
+        print('[Log] Register: username = %s password = %s' % (username, password))
+        with get_session() as session:
+            cnt = session.query(User).filter_by(username = username).count()
+            if cnt > 0:
+                return make_response('Failed: The username already exists\n', 403)
+            password = hmac.new(salt, password.encode(), digestmod = 'SHA1').hexdigest()
+            new_user = User(username = username, password = password)
+            session.add(new_user)
+            session.commit()
+        return make_response('register successfully\n', 200)
+
           
 api.add_resource(CreateResource, '/')
 api.add_resource(RUDResource, '/<id>')
+api.add_resource(UserResource, '/user')
