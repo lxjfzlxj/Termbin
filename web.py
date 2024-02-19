@@ -50,6 +50,10 @@ class CreateResource(Resource):
     #         print('login')
             
     def post(self):
+        save_author = request.form.get('save_author')
+        username = flask.session.get('username')
+        if save_author == 'true' and username is None:
+            return make_response('you must log in first to save author', 403)
         with get_session() as session:
             bytes = request.files['c'].read()
             print('[Log] Create a new clipboard, content: %s' % bytes.decode())
@@ -57,7 +61,10 @@ class CreateResource(Resource):
             md5.update(bytes)
             id = str(uuid.uuid4())
             short = get_short(id)
-            new_board = Clipboard(date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f %Z'), digest = md5.hexdigest(), short = short, size = len(bytes), url = name + '/' + short, uuid = id, content = bytes.decode(), status = AuthorStatus.all)
+            board_dict = dict(date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f %Z'), digest = md5.hexdigest(), short = short, size = len(bytes), url = name + '/' + short, uuid = id, content = bytes.decode(), status = AuthorStatus.all)
+            if save_author == 'true':
+                board_dict['author'] = username
+            new_board = Clipboard(**board_dict)
             try:
                 session.add(new_board)
                 session.commit()
