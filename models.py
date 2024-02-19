@@ -22,6 +22,12 @@ class Clipboard(Base):
     status = Column(Enum(AuthorStatus), nullable = False)
     someone = Column(String(45))
     
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, nullable = False, autoincrement = True, primary_key = True)
+    username = Column(String(45), nullable = False, unique = True)
+    password = Column(String(45), nullable = False)
+    
 engine = create_engine('mysql+pymysql://rigel:root@localhost:3306/termbin')
 DBsession = sessionmaker(bind = engine)
 
