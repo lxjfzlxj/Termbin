@@ -1,4 +1,5 @@
-from flask import Flask, request, make_response, session
+import flask
+from flask import Flask, request, make_response
 from flask_restful import Resource, Api
 from datetime import datetime, timedelta
 import hashlib
@@ -135,7 +136,33 @@ class UserResource(Resource):
             session.commit()
         return make_response('register successfully\n', 200)
 
+
+class SessionResource(Resource):
+    def get(self):
+        username = flask.session.get('username')
+        if username is None:
+            return make_response('not logged in\n', 200)
+        else:
+            return make_response('Hello, %s\n' % username, 200)
+    
+    def post(self):
+        header = request.headers.get('Authorization')
+        if not (header and header.startswith('Basic')):
+            return make_response('Failed: username and password not found\n', 403)
+        b64 = header.replace('Basic ', '', 1)
+        up = base64.b64decode(b64).decode()
+        username, password = up.split(':', 1)
+        print('[Log] Login: username = %s password = %s' % (username, password))
+        with get_session() as session:
+            user = session.query(User).filter_by(username = username).first()
+            password = hmac.new(salt, password.encode(), digestmod = 'SHA1').hexdigest()
+            if user.password != password:
+                return make_response('Failed: incorrect password\n', 403)
+            flask.session['username'] = username
+        return make_response('login successfully\n', 200)
+
           
 api.add_resource(CreateResource, '/')
 api.add_resource(RUDResource, '/<id>')
 api.add_resource(UserResource, '/user')
+api.add_resource(SessionResource, '/session')
