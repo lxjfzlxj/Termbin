@@ -9,6 +9,10 @@ class Visibility(enum.Enum):
     someone_only = 1
     all = 2
 
+class SelfDestruction(enum.Enum):
+    undestroyed = 0
+    destroyed = 1
+
 class Clipboard(Base):
     __tablename__ = 'clipboards'
     date = Column(String(45), nullable = False)
@@ -21,6 +25,7 @@ class Clipboard(Base):
     author = Column(String(45))
     visibility = Column(Enum(Visibility), nullable = False, default = Visibility.all)
     someone = Column(String(45))
+    self_destruction = Column(Enum(SelfDestruction))
     
 class User(Base):
     __tablename__ = 'users'
