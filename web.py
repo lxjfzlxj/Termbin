@@ -8,6 +8,7 @@ from models import Clipboard, Visibility, get_session, User, SelfDestruction
 import os
 import base64
 import hmac
+import time
 
 
 app = Flask(__name__)
@@ -61,6 +62,9 @@ class CreateResource(Resource):
             board_dict = dict(date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f %Z'), digest = md5.hexdigest(), short = short, size = len(bytes), url = name + '/' + short, uuid = id, content = bytes.decode(), visibility = Visibility.all)
             if username is not None:
                 board_dict['author'] = username
+            sunset = request.form.get('sunset')
+            if sunset is not None:
+                board_dict['expiration_time'] = int(time.time() + int(sunset))
             new_board = Clipboard(**board_dict)
             try:
                 session.add(new_board)
@@ -124,6 +128,8 @@ class RUDResource(Resource):
             else:
                 if board.visibility == Visibility.author_only and username != board.author or board.visibility == Visibility.someone_only and username != board.author and username != board.someone:
                     return make_response('Failed: no permission to view the clipboard\n', 403)
+                if int(time.time()) > board.expiration_time:
+                    return make_response('expired', 403)
                 if board.someone == username:
                     if board.self_destruction == SelfDestruction.destroyed:
                         return make_response('Failed: have burnt after reading\n', 200)
