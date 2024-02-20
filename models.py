@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Text, Enum, create_engine
+from sqlalchemy import Column, String, Integer, Text, Enum, create_engine, BigInteger
 from sqlalchemy.orm import sessionmaker, declarative_base
 import enum
 
@@ -26,6 +26,7 @@ class Clipboard(Base):
     visibility = Column(Enum(Visibility), nullable = False, default = Visibility.all)
     someone = Column(String(45))
     self_destruction = Column(Enum(SelfDestruction))
+    expiration_time = Column(BigInteger)
     
 class User(Base):
     __tablename__ = 'users'
