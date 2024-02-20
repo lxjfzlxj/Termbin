@@ -135,6 +135,19 @@ class RUDResource(Resource):
 
 
 class BoardVisibilityResource(Resource):
+    def get(self, id):
+        username = flask.session.get('username')
+        with get_session() as session:
+            board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
+            if board is None:
+                return make_response('Failed: Cannot find the UUID\n', 404)
+            if board.author is not None and username != board.author:
+                return make_response('Failed: no permission to view the information\n', 403)
+            response = 'visibility: %s\n' % board.visibility.name
+            if board.visibility == Visibility.someone_only:
+                response += 'someone: ' + board.someone + '\n'
+            return make_response(response, 200)
+    
     def put(self, id):
         username = flask.session.get('username')
         with get_session() as session:
@@ -162,6 +175,19 @@ class BoardVisibilityResource(Resource):
 
 
 class BoardSelfDestructionResource(Resource):
+    def get(self, id):
+        username = flask.session.get('username')
+        with get_session() as session:
+            board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
+            if board is None:
+                return make_response('Failed: Cannot find the UUID\n', 404)
+            if board.author is not None and username != board.author:
+                return make_response('Failed: no permission to view the information\n', 403)
+            if board.self_destruction == None:
+                return make_response('disabled\n', 200)
+            else:
+                return make_response('enabled\nstatus:%s\n' % board.self_destruction.name, 200)
+    
     def put(self, id):
         username = flask.session.get('username')
         with get_session() as session:
