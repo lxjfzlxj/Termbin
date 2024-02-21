@@ -27,6 +27,7 @@ class Clipboard(Base):
     someone = Column(String(45))
     self_destruction = Column(Enum(SelfDestruction))
     expiration_time = Column(BigInteger)
+    alias = Column(String(45))
     
 class User(Base):
     __tablename__ = 'users'
