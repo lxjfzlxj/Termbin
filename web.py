@@ -9,7 +9,7 @@ import os
 import base64
 import hmac
 import time
-
+import random
 
 app = Flask(__name__)
 api = Api(app)
@@ -27,19 +27,24 @@ def get_char(num):
     else:
         return chr(ord('0') + num - 52)
 
-def get_short(id):
-    short = ""
-    num = 0
-    mod = 62 ** 4
-    for c in id:
-        if str.isdigit(c):
-            num = (num * 16 + int(c)) % mod
-        else:
-            num = (num * 16 + ord(c) - ord('a') + 10) % mod
-    for i in range(4):
-        short += get_char(num % 62)
-        num //= 62
-    return short
+def duplicate_check(session, short):
+    check1 = (session.query(Clipboard).filter_by(short = short).count() == 0)
+    return check1
+
+def find_clipboard(session, url):
+    board = session.query(Clipboard).filter_by(uuid = url).first()
+    if board is not None:
+        return board
+    board = session.query(Clipboard).filter_by(short = url).first()
+    return board
+
+def get_short(session):
+    while True:
+        short = ""
+        for i in range(4):
+            short += get_char(random.randint(0, 61))
+        if duplicate_check(session, short):
+            return short
 
 class CreateResource(Resource):
     # def get(self):
@@ -58,7 +63,7 @@ class CreateResource(Resource):
             md5 = hashlib.md5()
             md5.update(bytes)
             id = str(uuid.uuid4())
-            short = get_short(id)
+            short = get_short(session)
             board_dict = dict(date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f %Z'), digest = md5.hexdigest(), short = short, size = len(bytes), url = name + '/' + short, uuid = id, content = bytes.decode(), visibility = Visibility.all)
             if username is not None:
                 board_dict['author'] = username
@@ -89,7 +94,7 @@ class RUDResource(Resource):
     def delete(self, id):
         username = flask.session.get('username')
         with get_session() as session:
-            board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
+            board = find_clipboard(session, id)
             if board is None:
                 response = make_response('Failed: Cannot find the UUID\n', 404)
             else:
@@ -103,7 +108,7 @@ class RUDResource(Resource):
     def put(self, id):
         username = flask.session.get('username')
         with get_session() as session:
-            board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
+            board = find_clipboard(session, id)
             if board is None:
                 response = make_response('Failed: Cannot find the UUID\n', 404)
             else:
@@ -122,14 +127,14 @@ class RUDResource(Resource):
     def get(self, id):
         username = flask.session.get('username')
         with get_session() as session:
-            board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
+            board = find_clipboard(session, id)
             if board is None:
                 response = make_response('Failed: Cannot find the UUID\n', 404)
             else:
                 if board.visibility == Visibility.author_only and username != board.author or board.visibility == Visibility.someone_only and username != board.author and username != board.someone:
                     return make_response('Failed: no permission to view the clipboard\n', 403)
-                if int(time.time()) > board.expiration_time:
-                    return make_response('expired', 403)
+                if board.expiration_time is not None and int(time.time()) > board.expiration_time:
+                    return make_response('expired\n', 403)
                 if board.someone == username:
                     if board.self_destruction == SelfDestruction.destroyed:
                         return make_response('Failed: have burnt after reading\n', 200)
@@ -144,7 +149,7 @@ class BoardVisibilityResource(Resource):
     def get(self, id):
         username = flask.session.get('username')
         with get_session() as session:
-            board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
+            board = find_clipboard(session, id)
             if board is None:
                 return make_response('Failed: Cannot find the UUID\n', 404)
             if board.author is not None and username != board.author:
@@ -157,7 +162,7 @@ class BoardVisibilityResource(Resource):
     def put(self, id):
         username = flask.session.get('username')
         with get_session() as session:
-            board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
+            board = find_clipboard(session, id)
             if board is None:
                 return make_response('Failed: Cannot find the UUID\n', 404)
             if board.author is not None and username != board.author:
@@ -184,7 +189,7 @@ class BoardSelfDestructionResource(Resource):
     def get(self, id):
         username = flask.session.get('username')
         with get_session() as session:
-            board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
+            board = find_clipboard(session, id)
             if board is None:
                 return make_response('Failed: Cannot find the UUID\n', 404)
             if board.author is not None and username != board.author:
@@ -197,7 +202,7 @@ class BoardSelfDestructionResource(Resource):
     def put(self, id):
         username = flask.session.get('username')
         with get_session() as session:
-            board = session.query(Clipboard).filter_by(**dict(uuid = id)).first()
+            board = find_clipboard(session, id)
             if board is None:
                 return make_response('Failed: Cannot find the UUID\n', 404)
             if board.author is not None and username != board.author:
