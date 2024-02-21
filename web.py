@@ -1,5 +1,5 @@
 import flask
-from flask import Flask, request, make_response
+from flask import Flask, request, make_response, jsonify
 from flask_restful import Resource, Api
 from datetime import datetime, timedelta
 import hashlib
@@ -51,6 +51,12 @@ def get_short(session):
         if duplicate_check(session, short):
             return short
         
+def my_make_response(msg, code):
+    if request.headers.get('User-Agent')[:5] == 'curl/':
+        return make_response(msg, code)
+    else:
+        return jsonify(msg = msg, code = code)
+        
 def create_clipboard(alias = None):
     print(alias)
     username = flask.session.get('username')
@@ -74,7 +80,8 @@ def create_clipboard(alias = None):
             status = 'failed'
         else:
             status = 'created'
-        return make_response('''
+        if request.headers.get('User-Agent')[:5] == 'curl/':
+            return make_response('''
 date: %s
 digest: %s
 short: %s
@@ -83,6 +90,8 @@ url: %s
 status: %s
 uuid: %s
 ''' % (new_board.date, new_board.digest, new_board.short, new_board.size, new_board.url, status, new_board.uuid), 200 if status == 'created' else 403)
+        else:
+            return jsonify(code = 200, msg = 'created', data = dict(date = new_board.date, digest = new_board.digest, short = new_board.short, size = new_board.size, url = new_board.url, uuid = new_board.uuid))
     
 
 class CreateResource(Resource):
@@ -102,7 +111,7 @@ class RUDResource(Resource):
     def post(self, id):
         with get_session() as session:
             if find_clipboard(session, id) is not None:
-                return make_response('Failed: This alias conflicts with some uuid/short/alias. Please change a new one.\n', 403)
+                return my_make_response('Failed: This alias conflicts with some uuid/short/alias. Please change a new one.\n', 403)
         return create_clipboard(id)
     
     def delete(self, id):
@@ -110,11 +119,11 @@ class RUDResource(Resource):
         with get_session() as session:
             board = find_clipboard(session, id)
             if board is None:
-                response = make_response('Failed: Cannot find the UUID\n', 404)
+                response = my_make_response('Failed: Cannot find the UUID\n', 404)
             else:
                 if board.author is not None and username != board.author:
-                    return make_response('Failed: no permission to update\n', 403)
-                response = make_response('deleted %s\n' % id, 200)
+                    return my_make_response('Failed: no permission to update\n', 403)
+                response = my_make_response('deleted %s\n' % id, 200)
                 session.delete(board)
                 session.commit()
             return response
@@ -124,11 +133,11 @@ class RUDResource(Resource):
         with get_session() as session:
             board = find_clipboard(session, id)
             if board is None:
-                response = make_response('Failed: Cannot find the UUID\n', 404)
+                response = my_make_response('Failed: Cannot find the UUID\n', 404)
             else:
                 if board.author is not None and username != board.author:
-                    return make_response('Failed: no permission to update\n', 403)
-                response = make_response('%s updated\n' % board.url, 200)
+                    return my_make_response('Failed: no permission to update\n', 403)
+                response = my_make_response('%s updated\n' % board.url, 200)
                 bytes = request.files['c'].read()
                 print('[Log] Update the clipboard, content: %s' % bytes.decode())
                 md5 = hashlib.md5()
@@ -143,18 +152,21 @@ class RUDResource(Resource):
         with get_session() as session:
             board = find_clipboard(session, id)
             if board is None:
-                response = make_response('Failed: Cannot find the UUID\n', 404)
+                response = my_make_response('Failed: Cannot find the UUID\n', 404)
             else:
                 if board.visibility == Visibility.author_only and username != board.author or board.visibility == Visibility.someone_only and username != board.author and username != board.someone:
-                    return make_response('Failed: no permission to view the clipboard\n', 403)
+                    return my_make_response('Failed: no permission to view the clipboard\n', 403)
                 if board.expiration_time is not None and int(time.time()) > board.expiration_time:
-                    return make_response('expired\n', 403)
+                    return my_make_response('expired\n', 403)
                 if board.someone == username:
                     if board.self_destruction == SelfDestruction.destroyed:
-                        return make_response('Failed: have burnt after reading\n', 200)
+                        return my_make_response('Failed: have burnt after reading\n', 200)
                     elif board.self_destruction == SelfDestruction.undestroyed:
                         board.self_destruction = SelfDestruction.destroyed
-                response = make_response(board.content, 200)
+                if request.headers.get('User-Agent')[:5] == 'curl/':
+                    response = make_response(board.content, 200)
+                else:
+                    response = jsonify(code = 200, data = dict(content = board.content), msg = 'success\n')
             session.commit()
             return response
 
@@ -165,38 +177,44 @@ class BoardVisibilityResource(Resource):
         with get_session() as session:
             board = find_clipboard(session, id)
             if board is None:
-                return make_response('Failed: Cannot find the UUID\n', 404)
+                return my_make_response('Failed: Cannot find the UUID\n', 404)
             if board.author is not None and username != board.author:
-                return make_response('Failed: no permission to view the information\n', 403)
+                return my_make_response('Failed: no permission to view the information\n', 403)
+            dic = {}
             response = 'visibility: %s\n' % board.visibility.name
+            dic['visibility'] = board.visibility.name
             if board.visibility == Visibility.someone_only:
                 response += 'someone: ' + board.someone + '\n'
-            return make_response(response, 200)
+                dic['someone'] = board.someone
+            if request.headers.get('User-Agent')[:5] == 'curl/':
+                return make_response(response, 200)
+            else:
+                return jsonify(code = 200, msg = 'success', data = dic)
     
     def put(self, id):
         username = flask.session.get('username')
         with get_session() as session:
             board = find_clipboard(session, id)
             if board is None:
-                return make_response('Failed: Cannot find the UUID\n', 404)
+                return my_make_response('Failed: Cannot find the UUID\n', 404)
             if board.author is not None and username != board.author:
-                return make_response('Failed: no permission to update\n', 403)
+                return my_make_response('Failed: no permission to update\n', 403)
             new_status = request.form.get('status')
             if getattr(Visibility, str(new_status), None) is None:
-                return make_response('Failed: invalid visibility format\n', 403)
+                return my_make_response('Failed: invalid visibility format\n', 403)
             if new_status == 'someone_only':
                 someone = request.form.get('someone')
                 if someone is None:
-                    return make_response('Failed: someone not found\n', 403)
+                    return my_make_response('Failed: someone not found\n', 403)
                 elif someone == board.author:
-                    return make_response('Failed: \'someone\' cannot be the same as the author\n', 403)
+                    return my_make_response('Failed: \'someone\' cannot be the same as the author\n', 403)
                 board.someone = someone
             else:
                 board.someone = None
                 board.self_destruction = None
             board.visibility = Visibility[new_status]
             session.commit()
-            return make_response('the visibility of %s updated: %s\n' % (board.url, board.visibility.name), 200)
+            return my_make_response('the visibility of %s updated: %s\n' % (board.url, board.visibility.name), 200)
 
 
 class BoardSelfDestructionResource(Resource):
@@ -205,69 +223,78 @@ class BoardSelfDestructionResource(Resource):
         with get_session() as session:
             board = find_clipboard(session, id)
             if board is None:
-                return make_response('Failed: Cannot find the UUID\n', 404)
+                return my_make_response('Failed: Cannot find the UUID\n', 404)
             if board.author is not None and username != board.author:
-                return make_response('Failed: no permission to view the information\n', 403)
+                return my_make_response('Failed: no permission to view the information\n', 403)
             if board.self_destruction == None:
-                return make_response('disabled\n', 200)
+                return my_make_response('disabled\n', 200)
             else:
-                return make_response('enabled\nstatus:%s\n' % board.self_destruction.name, 200)
+                if request.headers.get('User-Agent')[:5] == 'curl/':
+                    return make_response('enabled\nstatus:%s\n' % board.self_destruction.name, 200)
+                else:
+                    return jsonify(code = 200, msg = 'success', data = dict(status = board.self_destruction.name))
     
     def put(self, id):
         username = flask.session.get('username')
         with get_session() as session:
             board = find_clipboard(session, id)
             if board is None:
-                return make_response('Failed: Cannot find the UUID\n', 404)
+                return my_make_response('Failed: Cannot find the UUID\n', 404)
             if board.author is not None and username != board.author:
-                return make_response('Failed: no permission to update\n', 403)
+                return my_make_response('Failed: no permission to update\n', 403)
             if board.visibility != Visibility.someone_only:
-                return make_response('Failed: the clipboard should have visibility [someone_only]\n', 403)
+                return my_make_response('Failed: the clipboard should have visibility [someone_only]\n', 403)
             new_status = request.form.get('status')
             if new_status == 'true':
                 board.self_destruction = SelfDestruction.undestroyed
             elif new_status == 'false':
                 board.self_destruction = None
             else:
-                return make_response('Failed: invalid request format\n', 403)
+                return my_make_response('Failed: invalid request format\n', 403)
             session.commit()
-            return make_response('[Burn After Reading] %s\n' % ('enabled' if new_status == 'true' else 'disabled'), 200)
+            return my_make_response('[Burn After Reading] %s\n' % ('enabled' if new_status == 'true' else 'disabled'), 200)
 
             
 class UserResource(Resource):
     def post(self):
         header = request.headers.get('Authorization')
         if not (header and header.startswith('Basic')):
-            return make_response('Failed: username and password not found\n', 403)
+            return my_make_response('Failed: username and password not found\n', 403)
         b64 = header.replace('Basic ', '', 1)
         up = base64.b64decode(b64).decode()
         username, password = up.split(':', 1)
         if len(username) == 0 or len(password) == 0:
-            return make_response('Failed: username or password cannot be empty\n', 403)
+            return my_make_response('Failed: username or password cannot be empty\n', 403)
         print('[Log] Register: username = %s password = %s' % (username, password))
         with get_session() as session:
             cnt = session.query(User).filter_by(username = username).count()
             if cnt > 0:
-                return make_response('Failed: The username already exists\n', 403)
+                return my_make_response('Failed: The username already exists\n', 403)
             password = hmac.new(salt, password.encode(), digestmod = 'SHA1').hexdigest()
             new_user = User(username = username, password = password)
             session.add(new_user)
             session.commit()
-        return make_response('register successfully\n', 200)
+        return my_make_response('register successfully\n', 200)
 
 
 class SessionResource(Resource):
     def get(self):
         username = flask.session.get('username')
         if username is None:
-            return make_response('not logged in\n', 200)
+            if request.headers.get('User-Agent')[:5] == 'curl/':
+                return make_response('not logged in\n', 200)
+            else:
+                return jsonify(code = 200, msg = 'success', data = dict(logged_in = False))
         else:
-            return make_response('Hello, %s\n' % username, 200)
+            if request.headers.get('User-Agent')[:5] == 'curl/':
+                return make_response('Hello, %s\n' % username, 200)
+            else:
+                return jsonify(code = 200, msg = 'success', data = dict(logged_in = True, username = username))
     
     def post(self):
         header = request.headers.get('Authorization')
         if not (header and header.startswith('Basic')):
-            return make_response('Failed: username and password not found\n', 403)
+            return my_make_response('Failed: username and password not found\n', 403)
         b64 = header.replace('Basic ', '', 1)
         up = base64.b64decode(b64).decode()
         username, password = up.split(':', 1)
@@ -276,9 +303,9 @@ class SessionResource(Resource):
             user = session.query(User).filter_by(username = username).first()
             password = hmac.new(salt, password.encode(), digestmod = 'SHA1').hexdigest()
             if user.password != password:
-                return make_response('Failed: incorrect password\n', 403)
+                return my_make_response('Failed: incorrect password\n', 403)
             flask.session['username'] = username
-        return make_response('login successfully\n', 200)
+        return my_make_response('login successfully\n', 200)
 
           
 api.add_resource(CreateResource, '/')
