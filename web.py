@@ -29,13 +29,18 @@ def get_char(num):
 
 def duplicate_check(session, short):
     check1 = (session.query(Clipboard).filter_by(short = short).count() == 0)
-    return check1
+    check2 = (session.query(Clipboard).filter_by(uuid = short).count() == 0)
+    check3 = (session.query(Clipboard).filter_by(alias = short).count() == 0)
+    return check1 and check2 and check3
 
 def find_clipboard(session, url):
     board = session.query(Clipboard).filter_by(uuid = url).first()
     if board is not None:
         return board
     board = session.query(Clipboard).filter_by(short = url).first()
+    if board is not None:
+        return board
+    board = session.query(Clipboard).filter_by(alias = url).first()
     return board
 
 def get_short(session):
@@ -45,6 +50,40 @@ def get_short(session):
             short += get_char(random.randint(0, 61))
         if duplicate_check(session, short):
             return short
+        
+def create_clipboard(alias = None):
+    print(alias)
+    username = flask.session.get('username')
+    with get_session() as session:
+        bytes = request.files['c'].read()
+        print('[Log] Create a new clipboard, content: %s' % bytes.decode())
+        md5 = hashlib.md5()
+        md5.update(bytes)
+        id = str(uuid.uuid4())
+        short = get_short(session)
+        board_dict = dict(date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f %Z'), digest = md5.hexdigest(), short = short, size = len(bytes), url = name + '/' + short, uuid = id, content = bytes.decode(), author = username, visibility = Visibility.all, alias = alias)
+        sunset = request.form.get('sunset')
+        if sunset is not None:
+            board_dict['expiration_time'] = int(time.time() + int(sunset))
+        new_board = Clipboard(**board_dict)
+        try:
+            session.add(new_board)
+            session.commit()
+        except BaseException as e:
+            print('[Error] %s' % e)
+            status = 'failed'
+        else:
+            status = 'created'
+        return make_response('''
+date: %s
+digest: %s
+short: %s
+size: %d
+url: %s
+status: %s
+uuid: %s
+''' % (new_board.date, new_board.digest, new_board.short, new_board.size, new_board.url, status, new_board.uuid), 200 if status == 'created' else 403)
+    
 
 class CreateResource(Resource):
     # def get(self):
@@ -56,41 +95,16 @@ class CreateResource(Resource):
     #         print('login')
             
     def post(self):
-        username = flask.session.get('username')
-        with get_session() as session:
-            bytes = request.files['c'].read()
-            print('[Log] Create a new clipboard, content: %s' % bytes.decode())
-            md5 = hashlib.md5()
-            md5.update(bytes)
-            id = str(uuid.uuid4())
-            short = get_short(session)
-            board_dict = dict(date = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f %Z'), digest = md5.hexdigest(), short = short, size = len(bytes), url = name + '/' + short, uuid = id, content = bytes.decode(), visibility = Visibility.all)
-            if username is not None:
-                board_dict['author'] = username
-            sunset = request.form.get('sunset')
-            if sunset is not None:
-                board_dict['expiration_time'] = int(time.time() + int(sunset))
-            new_board = Clipboard(**board_dict)
-            try:
-                session.add(new_board)
-                session.commit()
-            except BaseException as e:
-                print('[Error] %s' % e)
-                status = 'failed'
-            else:
-                status = 'created'
-            return make_response('''
-date: %s
-digest: %s
-short: %s
-size: %d
-url: %s
-status: %s
-uuid: %s
-''' % (new_board.date, new_board.digest, new_board.short, new_board.size, new_board.url, status, new_board.uuid), 200 if status == 'created' else 403)
+        return create_clipboard()
 
 
 class RUDResource(Resource):
+    def post(self, id):
+        with get_session() as session:
+            if find_clipboard(session, id) is not None:
+                return make_response('Failed: This alias conflicts with some uuid/short/alias. Please change a new one.\n', 403)
+        return create_clipboard(id)
+    
     def delete(self, id):
         username = flask.session.get('username')
         with get_session() as session:
