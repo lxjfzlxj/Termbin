@@ -10,6 +10,8 @@ import base64
 import hmac
 import time
 import random
+from functools import reduce
+import json
 
 app = Flask(__name__)
 api = Api(app)
@@ -17,6 +19,7 @@ name = 'http://127.0.0.1:5000'
 app.secret_key = os.urandom(50)
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days = 1)
 salt = b'!@#$%^&*()'
+mime_dict = json.load(open('mimetype.json', 'r'))
 
 
 def get_char(num):
@@ -34,6 +37,8 @@ def duplicate_check(session, short):
     return check1 and check2 and check3
 
 def find_clipboard(session, url):
+    if url.find('.') != -1:
+        url = url.rsplit('.', 1)[0]
     board = session.query(Clipboard).filter_by(uuid = url).first()
     if board is not None:
         return board
@@ -151,6 +156,12 @@ class RUDResource(Resource):
         username = flask.session.get('username')
         with get_session() as session:
             board = find_clipboard(session, id)
+            filetype = None
+            if id.find('.') != -1:
+                filetype = '.' + id.rsplit('.', 1)[1]
+            # print(filetype)
+            if mime_dict.get(filetype) is None:
+                return my_make_response('Failed: invalid file type\n', 403)
             if board is None:
                 response = my_make_response('Failed: Cannot find the UUID\n', 404)
             else:
@@ -165,6 +176,8 @@ class RUDResource(Resource):
                         board.self_destruction = SelfDestruction.destroyed
                 if request.headers.get('User-Agent')[:5] == 'curl/':
                     response = make_response(board.content, 200)
+                    if filetype is not None:
+                        response.mimetype = mime_dict[filetype]
                 else:
                     response = jsonify(code = 200, data = dict(content = board.content), msg = 'success\n')
             session.commit()
